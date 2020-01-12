@@ -19,7 +19,7 @@ phases:
       - echo Get Profile on `date`
       - echo Build started on `date`
       - echo Vue.js Project Building...
-      - docker run --rm -v $(pwd):/work node:lts /bin/bash -c "cd /work && npm install -g yarn && yarn && yarn build"
+      - docker run --rm -v $(pwd):/work node:lts /bin/bash -c "cd /work && yarn && yarn build"
       - cp -r dist docker/
       - echo Build started on `date`
       - echo Building the Docker image...
