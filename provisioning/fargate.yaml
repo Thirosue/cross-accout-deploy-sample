@@ -1,0 +1,262 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "General Configuration"
+        Parameters:
+          - Env
+          - ServiceName
+      - Label:
+          default: "NetWork Configuration"
+        Parameters:
+          - VpcId
+          - PublicSubnetId
+          - PublicSecurityGroupId
+
+Parameters:
+  Env:
+    Description: An environment name that will be prefixed to resource names
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - stg
+      - prod
+
+  ServiceName:
+    Description: "input your ServiceName."
+    Type: String
+    Default: "sample-app"
+
+  # Network
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select a VPC that allows instances access to the Internet.
+
+  PublicSubnetId:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select at two public subnets in your selected VPC.
+
+  PublicSecurityGroupId:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: Select ervice Secutiry Groups.
+
+Resources:
+  ###############################################################
+  #  Common Settings
+  ###############################################################
+  # ------------------------------------------------------------#
+  #  ECS Role
+  # ------------------------------------------------------------#
+  ECSTaskExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Sub "${ServiceName}-ECSTaskExecutionRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "ecs-tasks.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Path: /
+
+  ECSTaskRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Sub "${ServiceName}-ECSTaskRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "ecs-tasks.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Path: /
+
+  # ------------------------------------------------------------#
+  #  CodeDeploy Role
+  # ------------------------------------------------------------#
+  CodeDeployServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ServiceName}-CodeDeployRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codedeploy.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Path: "/"
+
+  # ------------------------------------------------------------#
+  #  AutoScale Role
+  # ------------------------------------------------------------#
+  AutoScalingRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Sub "${ServiceName}-AutoScaleRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "application-autoscaling.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Path: /
+
+  # ------------------------------------------------------------#
+  #  ECS Cluster
+  # ------------------------------------------------------------#
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${ServiceName}-cluster"
+
+  ###############################################################
+  #  Task Settings
+  ###############################################################
+  # ------------------------------------------------------------#
+  #  CloudWatchLog Group (Container Logs)
+  # ------------------------------------------------------------#
+  FrontLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/var/log/${ServiceName}"
+      RetentionInDays: 14
+
+  # ------------------------------------------------------------#
+  #  Front Task Definition
+  # ------------------------------------------------------------#
+  FrontTaskdefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${ServiceName}-front"
+      Cpu: "256"
+      Memory: "0.5GB"
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/${ServiceName}-ECSTaskExecutionRole"
+      ContainerDefinitions:
+        - Name: front
+          Image: mirrored1976/sample-app-ver0:latest
+          PortMappings:
+            - ContainerPort: 80
+          Environment:
+            - Name: "TZ"
+              Value: "Asia/Tokyo"
+            - Name: "LANG"
+              Value: "ja_JP.UTF-8"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref FrontLogsGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: front
+
+  ###############################################################
+  #  Front Service Settings
+  ###############################################################
+  # ------------------------------------------------------------#
+  #  Internet ALB
+  # ------------------------------------------------------------#
+  FrontServiceALB:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Name: !Sub "${ServiceName}-loadbalancer"
+      Scheme: "internet-facing"
+      LoadBalancerAttributes:
+        - Key: "deletion_protection.enabled"
+          Value: false
+        - Key: "idle_timeout.timeout_seconds"
+          Value: 60
+      SecurityGroups: !Ref PublicSecurityGroupId
+      Subnets: !Ref PublicSubnetId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServiceName}-lb"
+
+  # ------------------------------------------------------------#
+  #  ECS Service
+  # ------------------------------------------------------------#
+  # CloudFormation未対応のため、ブルーグリーンプロイのサービスを管理コンソールから作成する
+  # FrontService:
+  #   Type: AWS::ECS::Service
+  #   Properties:
+  #     Cluster: !Ref ECSCluster
+  #     DesiredCount: 0
+  #     LaunchType: FARGATE
+  #     # LoadBalancers:
+  #     #   -
+  #     #     TargetGroupArn: !Ref FrontServiceTargetGroup
+  #     #     ContainerPort: 80
+  #     #     ContainerName: !Sub "front"
+  #     NetworkConfiguration:
+  #       AwsvpcConfiguration:
+  #         AssignPublicIp: ENABLED
+  #         SecurityGroups:
+  #           - !Ref InternalSecurityGroupId
+  #         Subnets: !Ref PrivateSubnetId
+  #     ServiceName: !Sub "${ServiceName}-front-service"
+  #     TaskDefinition: !Sub "${ServiceName}-front"
+  #     Tags:
+  #       - Key: datadog-enable
+  #         Value: true
+
+  # ------------------------------------------------------------#
+  #  Auto Scaling Settings
+  # ------------------------------------------------------------#
+  FrontServiceScaleOutAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-front-service-ScaleOutAlarm"
+      AlarmDescription: Alarm to add capacity if CPU is high
+      EvaluationPeriods: 2
+      Statistic: Average
+      TreatMissingData: notBreaching
+      Threshold: 50
+      Period: 60
+      Namespace: AWS/ECS
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref ECSCluster
+        - Name: ServiceName
+          Value: !Sub "${ServiceName}-front-service"
+      ComparisonOperator: GreaterThanThreshold
+      MetricName: CPUUtilization
+
+  FrontServiceScaleInAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ServiceName}-front-service-ScaleInAlarm"
+      AlarmDescription: Alarm to reduce capacity if container CPU is low
+      EvaluationPeriods: 2
+      Statistic: Average
+      TreatMissingData: notBreaching
+      Threshold: 25
+      Period: 300
+      Namespace: AWS/ECS
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref ECSCluster
+        - Name: ServiceName
+          Value: !Sub "${ServiceName}-front-service"
+      ComparisonOperator: LessThanThreshold
+      MetricName: CPUUtilization
