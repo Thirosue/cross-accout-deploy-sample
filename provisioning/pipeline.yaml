@@ -1,0 +1,188 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "General Configuration"
+        Parameters:
+          - ServiceName
+          - ProdAccountId
+          - GitHubOwner
+          - GitHubRepositoryName
+          - GitHubOAuthToken
+
+Parameters:
+  ServiceName:
+    Description: "input your ServiceName."
+    Type: String
+    Default: "sample-app"
+
+  ProdAccountId:
+    Type: String
+    Description: 'Set Enter Production Account ID'
+
+  GitHubOwner:
+    Type: String
+    Default: Thirosue
+    Description: 'Set Enter GitHub Owner'
+
+  GitHubRepositoryName:
+    Type: String
+    Default: cross-accout-deploy-sample
+    Description: 'Set Enter GitHub Repository Name'
+
+  GitHubOAuthToken:
+    Type: String
+    Description: 'Set Enter GitHub OAuthToken'
+
+Resources:
+  # ------------------------------------------------------------#
+  #  ApplicationDeployArtifactBucket
+  # ------------------------------------------------------------#
+  ApplicationDeployArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${ServiceName}-artifact-bucket
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Suspended
+
+  # ------------------------------------------------------------#
+  #  Repository Settings (ECR)
+  # ------------------------------------------------------------#
+  FrontContainerRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${ServiceName}
+
+  # ------------------------------------------------------------#
+  #  CodeBuild Role
+  # ------------------------------------------------------------#
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ServiceName}-CodeBuildRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Path: "/"
+
+  # ------------------------------------------------------------#
+  #  CodePipline Role
+  # ------------------------------------------------------------#
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ServiceName}-CodePipelineRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Path: "/"
+
+  # ------------------------------------------------------------#
+  #  Build Pipeline 
+  # ------------------------------------------------------------#
+  SampleCodeBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        BuildSpec: buildspec.yml
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:3.0
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_ACCOUNT_ID
+            Type: PLAINTEXT
+            Value: !Ref AWS::AccountId
+          - Name: PROD_ACCOUNT_ID
+            Type: PLAINTEXT
+            Value: !Ref ProdAccountId
+          - Name: AWS_DEFAULT_REGION
+            Type: PLAINTEXT
+            Value: !Ref AWS::Region
+          - Name: CONTAINER_NAME
+            Type: PLAINTEXT
+            Value: front
+          - Name: IMAGE_NAME
+            Type: PLAINTEXT
+            Value: !Sub ${ServiceName}
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+      Name: !Sub ${ServiceName}-codebuild
+      ServiceRole: !Ref CodeBuildServiceRole
+
+  SampleCodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub ${ServiceName}-codepipeline
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ApplicationDeployArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: download-source
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              Configuration:
+                Owner: !Ref GitHubOwner
+                Repo: !Ref GitHubRepositoryName
+                OAuthToken: !Ref GitHubOAuthToken
+                Branch: master
+              OutputArtifacts:
+                - Name: SourceOutput
+        - Name: Build
+          Actions:
+            - Name: BuildAction
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref SampleCodeBuild
+              RunOrder: 1
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+        # ブルーグリーンデプロイ設定を管理管理コンソールから設定する
+        # - Name: Deploy
+        #   Actions:
+        #     - Name: Deploy
+        #       ActionTypeId:
+        #         Category: Deploy
+        #         Owner: AWS
+        #         Version: 1
+        #         Provider: ECS
+        #       Configuration:
+        #         ClusterName: !Sub "${ServiceName}-cluster"
+        #         ServiceName: !Sub "${ServiceName}-front-service"
+        #       RunOrder: 1
+        #       InputArtifacts:
+        #         - Name: BuildApp
