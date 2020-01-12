@@ -5,7 +5,7 @@
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/var/log/nginx",
+          "awslogs-group": "/var/log/sample-app",
           "awslogs-region": "ap-northeast-1",
           "awslogs-stream-prefix": "front"
         }
