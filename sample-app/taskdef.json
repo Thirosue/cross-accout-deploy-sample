@@ -1,0 +1,30 @@
+{
+  "executionRoleArn": "arn:aws:iam::__ACOUNTID__:role/sample-app-ECSTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/var/log/nginx",
+          "awslogs-region": "ap-northeast-1",
+          "awslogs-stream-prefix": "front"
+        }
+      },
+      "portMappings": [
+        {
+          "hostPort": 80,
+          "protocol": "tcp",
+          "containerPort": 80
+        }
+      ],
+      "image": "<IMAGE_NAME>",
+      "name": "front"
+    }
+  ],
+  "memory": "512",
+  "compatibilities": ["EC2", "FARGATE"],
+  "family": "sample-app-front",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "256"
+}
