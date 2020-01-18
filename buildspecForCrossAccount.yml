@@ -1,0 +1,64 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      docker: 18
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - $(aws ecr get-login --no-include-email --region $AWS_DEFAULT_REGION)
+      - REPOSITORY_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${IMAGE_NAME}
+      - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - echo AWS Account Setiing ...
+      - cp taskdef.json taskdefOrigin.json
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Vue.js Project Building...
+      - docker run --rm -v $(pwd):/work node:lts /bin/bash -c "cd /work && yarn && yarn build"
+      - cp -r dist docker/
+      - echo Build started on `date`
+      - echo Building the Docker image...
+      - docker build -t $REPOSITORY_URI:latest docker/
+      - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo ########## 【Production】 Prepare Deploy Settings ... on `date`
+      - cp taskdefOrigin.json taskdef.json
+      - PROD_REPOSITORY_URI=${PROD_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${IMAGE_NAME}
+      - docker tag $REPOSITORY_URI:latest $PROD_REPOSITORY_URI:latest
+      - docker tag $REPOSITORY_URI:$IMAGE_TAG $PROD_REPOSITORY_URI:$IMAGE_TAG
+      - sed -i -e "s/__ACOUNTID__/$PROD_ACCOUNT_ID/" .prod-config
+      - echo ########## 【Production】 Pushing the Docker image ... on `date`
+      - export AWS_CONFIG_FILE=.prod-config
+      - $(aws ecr get-login --no-include-email --region $AWS_DEFAULT_REGION --profile cross-account-role)
+      - docker push $PROD_REPOSITORY_URI:latest
+      - docker push $PROD_REPOSITORY_URI:$IMAGE_TAG
+      - echo ########## 【Production】 Writing Task Definitions file...
+      - sed -i -e "s/__ACOUNTID__/$PROD_ACCOUNT_ID/" taskdef.json
+      - cat taskdef.json
+      - echo ########## 【Production】 Writing image definitions file...
+      - printf '{"Version":"1.0","ImageURI":"%s"}' $PROD_REPOSITORY_URI:$IMAGE_TAG > imageDetail.json
+      - cat imageDetail.json
+      - echo ########## 【Production】 Sync Deploy Setting file...
+      - aws s3 cp appspec.yaml s3://prod-sample-app-auto-deploy/ --acl bucket-owner-full-control
+      - aws s3 cp taskdef.json s3://prod-sample-app-auto-deploy/ --acl bucket-owner-full-control
+      - aws s3 cp imageDetail.json s3://prod-sample-app-auto-deploy/ --acl bucket-owner-full-control
+    finally:
+      - echo ########## 【Development】 Prepare Deploy Settings ... on `date`
+      - cp taskdefOrigin.json taskdef.json
+      - echo ########## 【Development】 Pushing the Docker image ... on `date`
+      - docker push $REPOSITORY_URI:latest
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - echo ########## 【Development】 Writing Task Definitions file...
+      - sed -i -e "s/__ACOUNTID__/$AWS_ACCOUNT_ID/" taskdef.json
+      - cat taskdef.json
+      - echo ########## 【Development】 Writing image definitions file...
+      - printf '{"Version":"1.0","ImageURI":"%s"}' $REPOSITORY_URI:$IMAGE_TAG > imageDetail.json
+      - cat imageDetail.json
+artifacts:
+  files:
+    - appspec.yaml
+    - taskdef.json
+    - imageDetail.json
