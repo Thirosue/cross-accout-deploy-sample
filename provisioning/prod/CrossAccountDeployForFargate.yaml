@@ -130,79 +130,79 @@ Resources:
       Path: "/"
 
   # ------------------------------------------------------------#
-  #  Api Build Pipeline
+  #  Build Pipeline
   # ------------------------------------------------------------#
-  # BuildProject:
-  #   Type: AWS::CodeBuild::Project
-  #   Properties:
-  #     Artifacts:
-  #       Type: CODEPIPELINE
-  #     Source:
-  #       Type: CODEPIPELINE
-  #       BuildSpec: |
-  #         version: 0.2
-  #         phases:
-  #           install:
-  #             runtime-versions:
-  #               docker: 18
-  #           post_build:
-  #             commands:
-  #               - aws s3 cp s3://prod-sample-app-auto-deploy/appspec.yaml .
-  #               - cat appspec.yaml
-  #               - aws s3 cp s3://prod-sample-app-auto-deploy/taskdef.json .
-  #               - cat taskdef.json
-  #               - aws s3 cp s3://prod-sample-app-auto-deploy/imageDetail.json .
-  #               - cat imageDetail.json
-  #         artifacts:
-  #           files:
-  #               - appspec.yaml
-  #               - taskdef.json
-  #               - imageDetail.json
-  #     Environment:
-  #       ComputeType: BUILD_GENERAL1_SMALL
-  #       Image: aws/codebuild/standard:3.0
-  #       Type: LINUX_CONTAINER
-  #       PrivilegedMode: true
-  #     LogsConfig:
-  #       CloudWatchLogs:
-  #         Status: ENABLED
-  #     Name: !Sub ${ServiceName}-codebuild
-  #     ServiceRole: !Ref CodeBuildServiceRole
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                docker: 18
+            post_build:
+              commands:
+                - aws s3 cp s3://prod-sample-app-auto-deploy/appspec.yaml .
+                - cat appspec.yaml
+                - aws s3 cp s3://prod-sample-app-auto-deploy/taskdef.json .
+                - cat taskdef.json
+                - aws s3 cp s3://prod-sample-app-auto-deploy/imageDetail.json .
+                - cat imageDetail.json
+          artifacts:
+            files:
+                - appspec.yaml
+                - taskdef.json
+                - imageDetail.json
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:3.0
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+      Name: !Sub ${ServiceName}-codebuild
+      ServiceRole: !Ref CodeBuildServiceRole
 
-  # BuildPipeline:
-  #   Type: AWS::CodePipeline::Pipeline
-  #   Properties:
-  #     Name: !Sub ${ServiceName}-codepipeline
-  #     RoleArn: !GetAtt CodePipelineServiceRole.Arn
-  #     ArtifactStore:
-  #       Type: S3
-  #       Location: !Ref ECSDeploySettingBucket
-  #     Stages:
-  #     - Name: Source
-  #       Actions:
-  #       - ActionTypeId:
-  #           Category: Source
-  #           Owner: AWS
-  #           Provider: ECR
-  #           Version: 1
-  #         Name: Source
-  #         Configuration: 
-  #           RepositoryName: !Ref ServiceName
-  #         OutputArtifacts:
-  #           - Name: BuildSource
-  #         RunOrder: 1
-  #     - Name: Build
-  #       Actions:
-  #       - ActionTypeId:
-  #           Category: Build
-  #           Owner: AWS
-  #           Provider: CodeBuild
-  #           Version: 1
-  #         Name: Build
-  #         Configuration:
-  #           ProjectName: !Ref BuildProject
-  #         InputArtifacts:
-  #           - Name: BuildSource
-  #         OutputArtifacts:
-  #           - Name: BuildOutPut
-  #         RunOrder: 1
+  BuildPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub ${ServiceName}-codepipeline
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ECSDeploySettingBucket
+      Stages:
+      - Name: Source
+        Actions:
+        - ActionTypeId:
+            Category: Source
+            Owner: AWS
+            Provider: ECR
+            Version: 1
+          Name: Source
+          Configuration: 
+            RepositoryName: !Ref ServiceName
+          OutputArtifacts:
+            - Name: BuildSource
+          RunOrder: 1
+      - Name: Build
+        Actions:
+        - ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Provider: CodeBuild
+            Version: 1
+          Name: Build
+          Configuration:
+            ProjectName: !Ref BuildProject
+          InputArtifacts:
+            - Name: BuildSource
+          OutputArtifacts:
+            - Name: BuildOutPut
+          RunOrder: 1
