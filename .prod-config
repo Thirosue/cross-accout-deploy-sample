@@ -1,0 +1,3 @@
+[profile cross-account-role]
+credential_source = EcsContainer
+role_arn = arn:aws:iam::__ACOUNTID__:role/auto-deploy-for-fargate

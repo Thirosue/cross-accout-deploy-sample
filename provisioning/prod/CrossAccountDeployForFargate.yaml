@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+    ServiceName:
+      Description: "input your ServiceName."
+      Type: String
+      Default: "sample-app"
+
+    Env:
+      Type: String
+      Default: prod
+      AllowedValues:
+        - stg
+        - prod
+      Description: 'Set Enter Environment for Lambda'
+
+    TargetAccountId:
+        Type: String
+        Description: 'Set Enter Build Source Account ID'
+        
+Resources:
+  # ------------------------------------------------------------#
+  #  Repository Settings (ECR)
+  # ------------------------------------------------------------#
+  FrontContainerRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${ServiceName}
+
+  # ------------------------------------------------------------#
+  #  Cross Account Role For Develop Account
+  # ------------------------------------------------------------#
+  ECRRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            AWS: !Sub arn:aws:iam::${TargetAccountId}:root
+          Action: sts:AssumeRole 
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
+      RoleName: !Sub auto-deploy-for-fargate
+
+  # ------------------------------------------------------------#
+  #  ApplicationDeployArtifactBucket
+  # ------------------------------------------------------------#
+  ECSDeploySettingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${Env}-${ServiceName}-auto-deploy
+      VersioningConfiguration:
+        Status: Enabled
+  ECSDeploySettingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ECSDeploySettingBucket
+      PolicyDocument:
+        Id: "Allow-Cross-Account-Access"
+        Version: '2012-10-17'
+        Statement:
+          - Sid: CrossAccountBucketPolicy
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${TargetAccountId}:root
+            Action:
+              - s3:*
+            Resource: !Sub arn:aws:s3:::${Env}-${ServiceName}-auto-deploy/*
+          - Sid: OwnBucketPolicy
+            Effect: Allow
+            Principal: 
+              AWS: !GetAtt CodePipelineServiceRole.Arn
+            Action:
+              - s3:*
+            Resource: !Sub arn:aws:s3:::${Env}-${ServiceName}-auto-deploy/*
+
+  # ------------------------------------------------------------#
+  #  CodeBuild Role
+  # ------------------------------------------------------------#
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ServiceName}-CodeBuildAdminRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Path: "/"
+
+  # ------------------------------------------------------------#
+  #  CodeDeploy Role
+  # ------------------------------------------------------------#
+  CodeDeployServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ServiceName}-CodeDeployAdminRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codedeploy.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Path: "/"
+
+  # ------------------------------------------------------------#
+  #  CodePipline Role
+  # ------------------------------------------------------------#
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ServiceName}-CodePipelineAdminRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Path: "/"
+
+  # ------------------------------------------------------------#
+  #  Api Build Pipeline
+  # ------------------------------------------------------------#
+  # BuildProject:
+  #   Type: AWS::CodeBuild::Project
+  #   Properties:
+  #     Artifacts:
+  #       Type: CODEPIPELINE
+  #     Source:
+  #       Type: CODEPIPELINE
+  #       BuildSpec: |
+  #         version: 0.2
+  #         phases:
+  #           install:
+  #             runtime-versions:
+  #               docker: 18
+  #           post_build:
+  #             commands:
+  #               - aws s3 cp s3://prod-sample-app-auto-deploy/appspec.yaml .
+  #               - cat appspec.yaml
+  #               - aws s3 cp s3://prod-sample-app-auto-deploy/taskdef.json .
+  #               - cat taskdef.json
+  #               - aws s3 cp s3://prod-sample-app-auto-deploy/imageDetail.json .
+  #               - cat imageDetail.json
+  #         artifacts:
+  #           files:
+  #               - appspec.yaml
+  #               - taskdef.json
+  #               - imageDetail.json
+  #     Environment:
+  #       ComputeType: BUILD_GENERAL1_SMALL
+  #       Image: aws/codebuild/standard:3.0
+  #       Type: LINUX_CONTAINER
+  #       PrivilegedMode: true
+  #     LogsConfig:
+  #       CloudWatchLogs:
+  #         Status: ENABLED
+  #     Name: !Sub ${ServiceName}-codebuild
+  #     ServiceRole: !Ref CodeBuildServiceRole
+
+  # BuildPipeline:
+  #   Type: AWS::CodePipeline::Pipeline
+  #   Properties:
+  #     Name: !Sub ${ServiceName}-codepipeline
+  #     RoleArn: !GetAtt CodePipelineServiceRole.Arn
+  #     ArtifactStore:
+  #       Type: S3
+  #       Location: !Ref ECSDeploySettingBucket
+  #     Stages:
+  #     - Name: Source
+  #       Actions:
+  #       - ActionTypeId:
+  #           Category: Source
+  #           Owner: AWS
+  #           Provider: ECR
+  #           Version: 1
+  #         Name: Source
+  #         Configuration: 
+  #           RepositoryName: !Ref ServiceName
+  #         OutputArtifacts:
+  #           - Name: BuildSource
+  #         RunOrder: 1
+  #     - Name: Build
+  #       Actions:
+  #       - ActionTypeId:
+  #           Category: Build
+  #           Owner: AWS
+  #           Provider: CodeBuild
+  #           Version: 1
+  #         Name: Build
+  #         Configuration:
+  #           ProjectName: !Ref BuildProject
+  #         InputArtifacts:
+  #           - Name: BuildSource
+  #         OutputArtifacts:
+  #           - Name: BuildOutPut
+  #         RunOrder: 1
